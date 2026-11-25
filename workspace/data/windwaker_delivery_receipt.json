@@ -1,0 +1,15 @@
+{
+  "wprefabUri": "hamlet-ugc/aigc_editor/dev/unity/MS4wLjABAAAAyvqdmrGLNT202gjmywqj-uY-M27N9cGwNr7K4ldqN2A7wZZqLTIKeW74rX46XC3f/eitflflegg6eihqv.wprefab",
+  "lastRootId": "1713233677",
+  "sceneImport": {
+    "ok": true,
+    "command": "scene",
+    "data": {
+      "operationId": "93f270a20ee8fed5321f9a9b8750358540a3a2a4c4c9d86b1c54a8454c58b189",
+      "status": "committed",
+      "rootIDs": [
+        "1713233677"
+      ]
+    }
+  }
+}
