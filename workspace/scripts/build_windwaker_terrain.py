@@ -91,8 +91,8 @@ ROAD_PATHS = [
     [(-6.0, -22.0), (-6.0, -14.0), (-2.0, -7.0), (4.7, 2.6), (13.5, 1.5), (19.0, 4.5), (12.0, 12.0), (-2.0, 14.0), (-11.0, 6.0), (-7.5, 1.5), (-2.0, -7.0)],
     # Farm border path loop around (4.5, 9.0)
     [(4.7, 2.6), (4.5, 5.2), (-1.2, 5.2), (-1.2, 12.8), (10.2, 12.8), (10.2, 5.2), (4.5, 5.2)],
-    # Dock to West Cape -> Lighthouse -> West Bridge -> South Islet -> East Causeway -> East Bay
-    [(-6.0, -21.0), (-18.0, -19.5), (-31.0, -21.0), (-38.0, -27.0), (-45.0, -26.0), (-54.0, -24.0)],
+    # Dock to West Cape -> Lighthouse gate -> West Bridge -> South Islet -> East Causeway -> East Bay
+    [(-6.0, -21.0), (-18.0, -19.5), (-31.0, -21.0), (-38.0, -27.0), (-45.0, -26.0), (-48.5, -24.5)],
     [(-38.0, -27.0), (-36.0, -33.5), (-28.0, -35.0), (-20.0, -36.5), (-11.0, -41.5), (-2.0, -45.0), (8.0, -43.5), (13.5, -38.5), (22.0, -36.0), (30.5, -33.5), (42.0, -27.0), (52.0, -30.0)],
     # West & East inland loops to North highlands
     [(-11.0, 6.0), (-25.0, 4.0), (-44.0, 3.0), (-48.0, -12.0), (-45.0, -26.0)],
@@ -203,8 +203,8 @@ def compute_terrain_fields(x: np.ndarray, z: np.ndarray):
     d_l2_wcor = sd_rounded_box_vec(x, z, -53.5, -14.5, 9.0, 9.0, 5.0)
     d_l2 = smin(smin(d_l2_north, d_l2_east, 6.0), smin(d_l2_nw, d_l2_wcor, 6.0), 6.0)
 
-    # L3 hill masks: West Lighthouse hill (+2.85m, wide 21m gentle apron) & North Camphor summit (+3.10m)
-    r_w_hill = np.sqrt((x + 54.5) ** 2 + (z + 24.0) ** 2) - 4.0
+    # L3 hill masks: West Lighthouse hill (+2.75m, wide 5.2m flat summit apron) & North Camphor summit (+3.10m)
+    r_w_hill = np.sqrt((x + 56.0) ** 2 + (z + 25.0) ** 2) - 5.2
     r_n_hill = np.sqrt(((x - 0.0) / 1.20) ** 2 + ((z - 55.0) / 0.90) ** 2) - 4.5
 
     # Ensure L1 and L2 stay safely away from shore (so coastline stays gentle L0 sandy beach!)
@@ -220,16 +220,14 @@ def compute_terrain_fields(x: np.ndarray, z: np.ndarray):
     h_main = 0.25 + 0.90 * w_l1 + 1.00 * w_l2
 
     # Blend L3 hills smoothly on top of local terrain
-    w_w_hill = smoothstep(23.0, 0.0, r_w_hill) * shore_guard_l3_w
+    w_w_hill = smoothstep(23.5, 0.0, r_w_hill) * shore_guard_l3_w
     w_n_hill = smoothstep(14.5, 0.0, r_n_hill) * shore_guard_l3_n
     h_main = h_main * (1.0 - w_w_hill) + 2.75 * w_w_hill
     h_main = h_main * (1.0 - w_n_hill) + 3.10 * w_n_hill
     w_l3 = np.maximum(w_w_hill, w_n_hill)
 
-    # Gentle Firefly Creek swale (only 0.16m shallow depression, totally walkable!)
-    d_creek = polyline_dist_vec(x, z, CREEK_PATH)
-    w_creek = smoothstep(4.8, 1.2, d_creek)
-    h_main = h_main - 0.16 * w_creek
+    # Creek ribbon removed per v6 spec: keep continuous walkable meadow without creek depression
+    d_creek = np.full_like(x, 1e9, dtype=np.float64)
 
     # South Islet smooth organic dome (+0.25 shore -> +0.95 amphitheater crest)
     r_south = np.sqrt(((x + 2.0) / 1.45) ** 2 + ((z + 45.0) / 0.85) ** 2) - 4.5
@@ -430,10 +428,6 @@ def generate_textures(bounds_x: tuple[float, float], bounds_z: tuple[float, floa
     col = col * (1.0 - road_outer[..., None]) + c_road_edge[None, None, :] * road_outer[..., None]
     speck = 0.96 + 0.06 * n_detail
     col = col * (1.0 - road_inner[..., None]) + (c_road[None, None, :] * speck[..., None]) * road_inner[..., None]
-
-    # Creek pebble swale
-    creek_w = smoothstep(3.4, 1.1, d_creek)
-    col = col * (1.0 - creek_w[..., None]) + c_creek_bed[None, None, :] * creek_w[..., None]
 
     # Beach sand blend (shore & low elevation)
     sand_mask = np.maximum(smoothstep(-3.8, -0.5, d_land), smoothstep(0.62, 0.34, hh))
@@ -924,6 +918,107 @@ def build_sea_and_horizon_islands():
                 f.use_smooth = True
             p2.data.materials.append(mat_isle_green)
 
+    # 4. Animated Coastal Wave Foam Bands & Sea Sparkle Layer (preserved in nodeMergeBlacklist)
+    def build_foam_ring_mesh(obj_name: str, off_in: float, off_out: float, y_pos: float, mat_name: str, hex_col: str, alpha: float, emission: float):
+        bm_f = bmesh.new()
+        for poly_pts, other_poly in ((MAIN_POLY, SOUTH_POLY), (SOUTH_POLY, MAIN_POLY)):
+            n_pts = len(poly_pts)
+            edge_nrms = []
+            for i in range(n_pts):
+                p0 = poly_pts[i]
+                p1 = poly_pts[(i + 1) % n_pts]
+                t = np.array([p1[0] - p0[0], p1[1] - p0[1]])
+                ln = max(float(np.linalg.norm(t)), 1e-6)
+                t /= ln
+                nrm = np.array([t[1], -t[0]])
+                mid = 0.5 * (p0 + p1)
+                test_pt = mid + nrm * 0.5
+                if float(poly_sdf_vec(np.array([test_pt[0]]), np.array([test_pt[1]]), poly_pts)[0]) < 0:
+                    nrm = -nrm
+                edge_nrms.append(nrm)
+
+            verts_in, verts_out = [], []
+            for i in range(n_pts):
+                vn = edge_nrms[(i - 1) % n_pts] + edge_nrms[i]
+                vln = max(float(np.linalg.norm(vn)), 1e-6)
+                vn /= vln
+                pi = poly_pts[i]
+                pin = pi + vn * off_in
+                pout = pi + vn * off_out
+                verts_in.append(bm_f.verts.new(unity_to_blender_pos(float(pin[0]), y_pos, float(pin[1]))))
+                verts_out.append(bm_f.verts.new(unity_to_blender_pos(float(pout[0]), y_pos, float(pout[1]))))
+
+            for i in range(n_pts):
+                j = (i + 1) % n_pts
+                mid = 0.5 * (poly_pts[i] + poly_pts[j]) + edge_nrms[i] * ((off_in + off_out) * 0.5)
+                dc = float(seg_dist_vec(np.array([mid[0]]), np.array([mid[1]]), EAST_CAUSEWAY_A, EAST_CAUSEWAY_B)[0])
+                dw = float(seg_dist_vec(np.array([mid[0]]), np.array([mid[1]]), WEST_BRIDGE_A, WEST_BRIDGE_B)[0])
+                do = float(poly_sdf_vec(np.array([mid[0]]), np.array([mid[1]]), other_poly)[0])
+                if dc < 2.6 or dw < 2.4 or do < 0.8:
+                    continue
+                f = bm_f.faces.new((verts_in[i], verts_in[j], verts_out[j], verts_out[i]))
+                f.smooth = True
+
+        bm_f.normal_update()
+        for f in bm_f.faces:
+            if f.normal.z < 0.0:
+                f.normal_flip()
+        bm_f.normal_update()
+        assert all(f.normal.z > 0.0 for f in bm_f.faces), f"{obj_name} has non-upward face normals!"
+        m_f = bpy.data.meshes.new(obj_name)
+        bm_f.to_mesh(m_f)
+        bm_f.free()
+        o_f = bpy.data.objects.new(obj_name, m_f)
+        bpy.context.collection.objects.link(o_f)
+        o_f.data.materials.append(make_flat_mat(mat_name, hex_col, roughness=0.30, alpha=alpha, emission=emission))
+
+    build_foam_ring_mesh("WW_WaveFoam_Inner", 0.25, 1.45, 0.042, "WW_Wave_Foam_Inner_Mat", "#F2FFFF", 0.88, 0.26)
+    build_foam_ring_mesh("WW_WaveFoam_Outer", 2.30, 3.30, 0.035, "WW_Wave_Foam_Outer_Mat", "#ADEFF8", 0.72, 0.22)
+
+    # Sea Sparkle Layer: 44 Wind-Waker crescent/diamond surface glints in d_shore in [6m, 60m]
+    rng_sp = np.random.default_rng(20261126)
+    bm_sp = bmesh.new()
+    placed_sp = 0
+    for attempt in range(400):
+        if placed_sp >= 44:
+            break
+        ang = float(rng_sp.uniform(0.0, 2.0 * math.pi))
+        rad = float(rng_sp.uniform(38.0, 118.0))
+        sx = rad * math.cos(ang)
+        sz = rad * math.sin(ang)
+        sf = compute_terrain_fields(np.array([[sx]]), np.array([[sz]]))
+        ds = float(np.minimum(sf["d_land"], sf["d_causeway"])[0, 0])
+        dw = float(sf["d_wbridge"][0, 0])
+        if 6.0 <= ds <= 60.0 and dw > 3.5:
+            # Sleek Wind-Waker elongated diamond-wave highlight
+            w_len = float(rng_sp.uniform(2.2, 4.4))
+            w_wid = float(rng_sp.uniform(0.38, 0.65))
+            yaw_sp = ang + math.pi * 0.5 + float(rng_sp.uniform(-0.25, 0.25))
+            cs, sn = math.cos(yaw_sp), math.sin(yaw_sp)
+            pts_local = [(-w_len, 0.0), (0.0, w_wid), (w_len, 0.0), (0.0, -w_wid * 0.35)]
+            vs = []
+            for lx, lz in pts_local:
+                wx = sx + lx * cs - lz * sn
+                wz = sz + lx * sn + lz * cs
+                vs.append(bm_sp.verts.new(unity_to_blender_pos(wx, 0.030, wz)))
+            f = bm_sp.faces.new(vs)
+            f.smooth = True
+            placed_sp += 1
+
+    bm_sp.normal_update()
+    for f in bm_sp.faces:
+        if f.normal.z < 0.0:
+            f.normal_flip()
+    bm_sp.normal_update()
+    assert all(f.normal.z > 0.0 for f in bm_sp.faces), "WW_SeaSparkle_Layer has non-upward face normals!"
+    m_sp = bpy.data.meshes.new("WW_SeaSparkle_Layer")
+    bm_sp.to_mesh(m_sp)
+    bm_sp.free()
+    o_sp = bpy.data.objects.new("WW_SeaSparkle_Layer", m_sp)
+    bpy.context.collection.objects.link(o_sp)
+    o_sp.data.materials.append(make_flat_mat("WW_Sea_Sparkle_Mat", "#E8FFFF", roughness=0.25, alpha=0.78, emission=0.28))
+    print(f"[SEA] Added WW_WaveFoam_Inner, WW_WaveFoam_Outer, WW_SeaSparkle_Layer ({placed_sp} glints)")
+
     bpy.ops.export_scene.gltf(
         filepath=str(SEA_GLB),
         export_format="GLB",
@@ -1000,11 +1095,10 @@ def main():
 
     heights_data = json.loads(HEIGHTS_JSON.read_text(encoding="utf-8"))
 
-    # Build Terrain GLB
+    # Build Terrain GLB (creek water ribbon removed per v6 spec)
     bpy.ops.wm.read_factory_settings(use_empty=True)
     build_continuous_terrain_mesh(bounds_x, bounds_z, step=1.0)
     build_west_arch_bridge()
-    build_creek_water_ribbon()
     build_invisible_sea_boundary()
 
     bpy.ops.export_scene.gltf(

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "maxRouteSlopeDeg": 12.38,
+    "maxRouteSlopeDeg": 11.94,
     "maxStepM": 0.113,
     "recommendedWorldImportPos": [
       115.0,
@@ -54,14 +54,14 @@
     {
       "route": "West_Cape_to_Lighthouse_L3",
       "samples": 46,
-      "maxSlopeDeg": 11.88,
+      "maxSlopeDeg": 11.84,
       "maxStepM": 0.113
     },
     {
       "route": "West_Post_to_South_Beach",
       "samples": 74,
-      "maxSlopeDeg": 12.38,
-      "maxStepM": 0.113
+      "maxSlopeDeg": 11.94,
+      "maxStepM": 0.109
     },
     {
       "route": "East_Causeway_to_South_Islet",

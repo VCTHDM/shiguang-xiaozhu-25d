@@ -66,27 +66,18 @@ def process_one(folder: str, fbx_name: str, out_id: str, target_h: float, target
         o.select_set(True)
     bpy.context.view_layer.objects.active = meshes[0]
     bpy.ops.object.parent_clear(type="CLEAR_KEEP_TRANSFORM")
-    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
     if len(meshes) > 1:
         bpy.ops.object.join()
     obj = bpy.context.view_layer.objects.active
     obj.name = out_id
 
-    # Normalize scale to target height and center bottom at (0, 0, 0)
-    mins, maxs = world_mesh_bounds([obj])
-    cur_h = max(maxs.z - mins.z, 1e-4)
-    scale_f = target_h / cur_h
-    obj.scale = (scale_f, scale_f, scale_f)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    for o in list(bpy.context.scene.objects):
+        if o != obj:
+            bpy.data.objects.remove(o, do_unlink=True)
 
-    mins, maxs = world_mesh_bounds([obj])
-    cx = 0.5 * (mins.x + maxs.x)
-    cy = 0.5 * (mins.y + maxs.y)
-    obj.location = Vector((-cx, -cy, -mins.z))
-    bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
-
-    # Decimate high-poly Tripo geometry cleanly
+    # Decimate high-poly Tripo geometry cleanly before final exact bottom-center normalization
     poly_cnt = len(obj.data.polygons)
     if poly_cnt > target_faces:
         mod = obj.modifiers.new("Decimate", "DECIMATE")
@@ -94,6 +85,21 @@ def process_one(folder: str, fbx_name: str, out_id: str, target_h: float, target
         mod.ratio = max(0.01, min(1.0, target_faces / float(poly_cnt)))
         mod.use_collapse_triangulate = True
         bpy.ops.object.modifier_apply(modifier=mod.name)
+
+    # Normalize scale to target height and bake bottom-center directly at vertex origin (0, 0, 0)
+    from mathutils import Matrix
+    verts = [v.co for v in obj.data.vertices]
+    mins = Vector((min(v.x for v in verts), min(v.y for v in verts), min(v.z for v in verts)))
+    maxs = Vector((max(v.x for v in verts), max(v.y for v in verts), max(v.z for v in verts)))
+    cur_h = max(maxs.z - mins.z, 1e-4)
+    scale_f = target_h / cur_h
+    origin = Vector((0.5 * (mins.x + maxs.x), 0.5 * (mins.y + maxs.y), mins.z))
+    obj.data.transform(Matrix.Scale(scale_f, 4) @ Matrix.Translation(-origin))
+    obj.location = (0.0, 0.0, 0.0)
+    obj.rotation_euler = (0.0, 0.0, 0.0)
+    obj.scale = (1.0, 1.0, 1.0)
+    min_z_after = min(v.co.z for v in obj.data.vertices)
+    assert abs(min_z_after) < 1e-4, f"{out_id} min_z_after={min_z_after}"
 
     for f in obj.data.polygons:
         f.use_smooth = True
@@ -129,10 +135,14 @@ def process_one(folder: str, fbx_name: str, out_id: str, target_h: float, target
 
     img_fmt = "AUTO" if has_transparency else "JPEG"
     out_glb = OUT_DIR / f"{out_id}.glb"
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
     bpy.ops.export_scene.gltf(
         filepath=str(out_glb),
         export_format="GLB",
         export_yup=True,
+        use_selection=True,
         export_apply=True,
         export_materials="EXPORT",
         export_image_format=img_fmt,

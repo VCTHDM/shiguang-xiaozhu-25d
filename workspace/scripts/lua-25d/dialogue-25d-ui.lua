@@ -57,17 +57,50 @@ local NPC_DIALOGUES = {
   },
 }
 
-local ALL_PORTRAIT_FRAMES = {
-  "dialogueRoot/portraitCardPanel/amuFrame01",
-  "dialogueRoot/portraitCardPanel/amuFrame02",
-  "dialogueRoot/portraitCardPanel/amuFrame03",
-  "dialogueRoot/portraitCardPanel/amuFrame04",
-  "dialogueRoot/portraitCardPanel/amuFrame05",
-  "dialogueRoot/portraitCardPanel/amuFrame06",
-  "dialogueRoot/portraitCardPanel/mianmianFrame01",
-  "dialogueRoot/portraitCardPanel/mianmianFrame02",
-  "dialogueRoot/portraitCardPanel/mianmianFrame03",
-  "dialogueRoot/portraitCardPanel/mianmianFrame04",
+NPC_DIALOGUES.C03 = {
+  speaker = "阿橘",
+  title = "未寄信件收藏家",
+  frames = { "dialogueRoot/portraitCardPanel/ajuPortrait" },
+  lines = {
+    { who = "阿橘：", text = "信箱里又多了一封没写收件人的信。我先替它晒晒太阳。" },
+    { who = "阿橘：", text = "有些话写下来就够了。过几天再读，说不定会想寄出去。" },
+  },
+}
+NPC_DIALOGUES.C04 = {
+  speaker = "奶包",
+  title = "夜市烘焙师",
+  frames = { "dialogueRoot/portraitCardPanel/naibaoPortrait" },
+  lines = {
+    { who = "奶包：", text = "第一炉海盐面包刚出炉。闻得到吗？晚点我就推车去夜市。" },
+    { who = "奶包：", text = "有多的草莓就带给我吧。我想试试把果酱烤在面包里。" },
+  },
+}
+NPC_DIALOGUES.C05 = {
+  speaker = "墨羽",
+  title = "夜行星象信使",
+  frames = { "dialogueRoot/portraitCardPanel/moyuPortrait" },
+  lines = {
+    { who = "墨羽：", text = "今天云很薄。傍晚来山坡，能看见第一颗星从海面上升起来。" },
+    { who = "墨羽：", text = "以前我靠星星认路。现在我会先认一认灯塔的光。" },
+  },
+}
+NPC_DIALOGUES.C07 = {
+  speaker = "团团",
+  title = "单车驿站长",
+  frames = { "dialogueRoot/portraitCardPanel/tuantuanPortrait" },
+  lines = {
+    { who = "团团：", text = "哎，信还在包里！我刚才一直以为落在车篮了。" },
+    { who = "团团：", text = "去海边的话，沿着大路走就好。沙地骑车容易陷进去。" },
+  },
+}
+NPC_DIALOGUES.C09 = {
+  speaker = "绒绒",
+  title = "纸片画师",
+  frames = { "dialogueRoot/portraitCardPanel/rongrongPortrait" },
+  lines = {
+    { who = "绒绒：", text = "我想画一张抱月湾的明信片。你觉得该从喷泉边画起，还是从灯塔边？" },
+    { who = "绒绒：", text = "先把光画下来吧。刚刚风一吹，水面上的颜色又变了。" },
+  },
 }
 
 local uiCache = {}
@@ -77,11 +110,13 @@ local isDialogueOpen = false
 local activeNpcId = nil
 local activeLineIdx = 1
 local portraitFrameIdx = 1
+local visiblePortraitPath = nil
 local portraitTimer = 0.0
 local toastTimer = 0.0
 local hudRefreshTimer = 0.0
 local nearbyTarget = nil -- { kind = "npc"|"plot", id = ..., label = ..., actionable = bool }
-local bondCounts = { C01 = 0, C02 = 0 }
+local bondCounts = {}
+for npcId in pairs(NPC_DIALOGUES) do bondCounts[npcId] = 0 end
 
 local function getNodeGo(nodePath)
   if uiCache[nodePath] ~= nil then return uiCache[nodePath] end
@@ -155,8 +190,10 @@ local function applyPortraitFrame()
   if cfg == nil then return end
   local frames = cfg.frames
   local activePath = frames[((portraitFrameIdx - 1) % #frames) + 1]
-  for _, p in ipairs(ALL_PORTRAIT_FRAMES) do
-    setNodeActive(p, p == activePath)
+  if activePath ~= visiblePortraitPath then
+    if visiblePortraitPath ~= nil then setNodeActive(visiblePortraitPath, false) end
+    setNodeActive(activePath, true)
+    visiblePortraitPath = activePath
   end
 end
 
@@ -228,14 +265,11 @@ local function CloseDialogue()
   isDialogueOpen = false
   activeNpcId = nil
   setNodeActive("dialogueRoot", false)
-  for _, p in ipairs(ALL_PORTRAIT_FRAMES) do
-    setNodeActive(p, false)
+  if visiblePortraitPath ~= nil then
+    setNodeActive(visiblePortraitPath, false)
+    visiblePortraitPath = nil
   end
   restoreSystemGameUI()
-  local bus = _G.SHIGUANG_25D
-  if bus ~= nil and bus.ReapplyCamera ~= nil then
-    bus.ReapplyCamera(0.8)
-  end
   return true
 end
 
@@ -339,9 +373,7 @@ end
 
 local function TriggerNearbyInteract()
   if isDialogueOpen then return false end
-  if nearbyTarget == nil then
-    updateProximityTarget()
-  end
+  updateProximityTarget()
   if nearbyTarget == nil then return false end
 
   if nearbyTarget.kind == "npc" then
@@ -365,8 +397,8 @@ function Start()
   setNodeActive("dialogueRoot", false)
   setNodeActive("interactPanel", false)
   setNodeActive("toastPanel", false)
-  for _, p in ipairs(ALL_PORTRAIT_FRAMES) do
-    setNodeActive(p, false)
+  for _, npc in pairs(NPC_DIALOGUES) do
+    for _, path in ipairs(npc.frames) do setNodeActive(path, false) end
   end
 
   bindButton("farmHudPanel/seedSwitchBtn", OnSeedSwitchClick)
@@ -391,7 +423,7 @@ function Start()
         portraitFrameIdx = portraitFrameIdx,
         nearbyKind = nearbyTarget ~= nil and nearbyTarget.kind or nil,
         nearbyId = nearbyTarget ~= nil and nearbyTarget.id or nil,
-        bondCounts = { C01 = bondCounts.C01, C02 = bondCounts.C02 },
+        bondCounts = bondCounts,
       }
     end,
   }
@@ -409,11 +441,13 @@ function Update()
   end
 
   if isDialogueOpen then
-    portraitTimer = portraitTimer + dt
-    if portraitTimer >= 0.125 then
-      portraitTimer = portraitTimer - 0.125
-      portraitFrameIdx = portraitFrameIdx + 1
-      applyPortraitFrame()
+    if #NPC_DIALOGUES[activeNpcId].frames > 1 then
+      portraitTimer = portraitTimer + dt
+      if portraitTimer >= 0.125 then
+        portraitTimer = portraitTimer - 0.125
+        portraitFrameIdx = portraitFrameIdx + 1
+        applyPortraitFrame()
+      end
     end
     if Input ~= nil and KeyCode ~= nil and Input.GetKeyDown(KeyCode.Escape) then
       CloseDialogue()
